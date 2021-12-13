@@ -43,15 +43,10 @@ class MQxx : public PollingComponent, public Sensor {
                 MQxxS->setR0(_calcR0/10);
                 ESP_LOGI("MQ135", "Calibration  done!");
                 if(isinf(_calcR0)) {
-                    _setup_warnings = (char*)"Warning: Conection issue founded, R0 is infite (Open circuit detected) please check your wiring and supply";
+                    _setup_warnings = "Warning: Conection issue founded, R0 is infite (Open circuit detected) please check your wiring and supply\n";
                 }
                 if(_calcR0 == 0) {
-                    if (_setup_warnings != NULL && strlen(_setup_warnings)>0) {
-                        sprintf(_setup_warnings,"%s\n%s",_setup_warnings,(char*)"Warning: Conection issue founded, R0 is zero (Analog pin with short circuit to ground) please check your wiring and supply");
-                    }
-                    else {
-                        _setup_warnings =  (char*)"Warning: Conection issue founded, R0 is zero (Analog pin with short circuit to ground) please check your wiring and supply";
-                    }
+                    _setup_warnings += "Warning: Conection issue founded, R0 is zero (Analog pin with short circuit to ground) please check your wiring and supply\n";
                 }
             }
             _setup_done = true;
@@ -59,8 +54,8 @@ class MQxx : public PollingComponent, public Sensor {
 
         void update() override {
             // print startup warning with delay after ESP-32 is connected to WiFi
-            if (_setup_warnings != NULL && strlen(_setup_warnings)>0 and _count == 10) {
-                ESP_LOGW("MQxx", "setup_warnings %s", _setup_warnings);
+            if (_setup_warnings.length() > 0 and _count == 10) {
+                ESP_LOGW("MQxx", "setup_warnings %s", _setup_warnings.c_str());
                 _setup_warnings = (char*)"";
             }
             
@@ -85,7 +80,7 @@ class MQxx : public PollingComponent, public Sensor {
         int _pin;
         char* _stype; // MQ-135
         bool _setup_done;
-        char* _setup_warnings;
+        String _setup_warnings;
         int _count;
         //MQUnifiedsensor MQxxS;
         MQUnifiedsensor *MQxxS;
