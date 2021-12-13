@@ -1,0 +1,208 @@
+substitutions:
+  roomname: airsensors
+  ip: 10.0.0.243
+  yourname: xxx
+  ssid: !secret wifi_ssid
+  
+globals:
+  - id: max_mq135_gas_sensor_co2
+    type: float
+    initial_value: "1800"
+
+esphome:
+  name: $roomname
+  platform: ESP32
+  board: esp32dev
+  on_boot:
+    priority: -100.0
+    then:
+      - delay: 10ms
+  includes:
+    - include/mqsensor.h
+  libraries:
+    - "MQUnifiedsensor"
+
+# Enable logging
+logger:
+  level: !secret log_level
+  
+syslog:
+    ip_address: "10.0.0.210"
+    port: 514
+
+# Enable Home Assistant API
+api:
+  password: !secret api_passwd
+  reboot_timeout: !secret reboot_timeout
+
+ota:
+  password: !secret ota_passwd
+
+wifi:
+  ssid: $ssid
+  password: !secret wifi_password
+  use_address: $ip
+  domain: .my.local
+  reboot_timeout: !secret reboot_timeout
+  fast_connect: on
+  manual_ip:
+    static_ip: $ip
+    gateway: 10.0.0.1
+    subnet: 255.255.255.0
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  # ap:
+  #   ssid: ${roomname}_ESP32
+  #   password: !secret wifi_bkp_password
+
+time:
+  - platform: homeassistant
+    id: esptime
+#    on_time:
+#      # Every 5 minutes
+#      - seconds: 0
+#        minutes: /5
+#        then:
+#          - switch.toggle: my_switch
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: ${roomname}_IP_Address
+    ssid:
+      name: ${roomname}_ESP_Connected_SSID
+      id: wifi_info_ssid_sensor
+    bssid:
+      name: ${roomname}_ESP_Connected_BSSID
+    mac_address:
+      name: ${roomname}_ESP_Mac_Wifi_Address
+  - platform: homeassistant
+    name: Vio ESP32 Room
+    entity_id: input_select.vio_esp32_room_is
+    id: vio_esp32_room
+    internal: true
+
+# captive_portal:
+
+switch:
+  - platform: restart
+    name: ${roomname}_Restart
+    id: ${roomname}_restart_switch
+  - platform: gpio
+    pin: 12
+    id: ${roomname}_buzzer
+    name: ${roomname}_Buzzer
+    icon: "mdi:bullhorn"
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+        - script.execute: buzzer_script_turn_off
+    #   - logger.log: 
+    #       format: "Switch Turned On!"
+    #       level: INFO
+    # on_turn_off:
+    #   - logger.log: 
+    #       format: "Switch Turned Off!"
+    #       level: INFO
+
+i2c:
+    sda: 4
+    scl: 15
+    frequency: 10kHz
+    scan: True
+
+font:
+  - file: "fonts/ComicSansMS3.ttf"
+    id: my_font
+    size: 20
+  - file: "fonts/ComicSansMS3.ttf"
+    id: my_font_small
+    size: 12
+
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x64"
+    reset_pin: 16
+    address: 0x3C
+    update_interval: 15s
+    lambda: |-
+      it.strftime(64, 0, id(my_font), TextAlign::TOP_CENTER, "%H:%M", id(esptime).now());
+      // it.printf(8, 24, id(my_font_small), "%s / %.1f", id(vio_esp32_room).state.c_str(), id(apple_watch_rssi).state);
+      it.printf(4, 44, id(my_font_small), "%s / %.1f", id(wifi_info_ssid_sensor).state.c_str(), id(wifi_signal_sensor).state);
+
+binary_sensor:
+  - platform: status
+    name: ${roomname}_Status
+    id: esp32_status
+  - platform: homeassistant
+    name: "HA DND IB"
+    entity_id: input_boolean.do_not_disturb_ib
+    id: ha_do_not_disturb_ib
+    internal: true
+
+sensor:
+  - platform: wifi_signal
+    name: "${roomname}_WiFi_Signal"
+    id: wifi_signal_sensor
+    update_interval: 1s
+  - platform: uptime
+    name: "${roomname}_Uptime"
+    id: ${roomname}_uptime
+    internal: true
+
+  - platform: custom
+    lambda: |-
+      auto mh135 = new MQxx(36, (char*)"MQ-135");
+      App.register_component(mh135);
+      return {mh135->value_sensor};
+      // return {sht20->temperature_sensor, sht20->humidity_sensor, sht20->vpd_sensor, sht20->dew_point_sensor};
+    sensors:
+        - name: "${roomname}_mq135_gas_sensor_co2"
+          id: ${roomname}_mq135_gas_sensor_co2
+          unit_of_measurement: ppm
+          accuracy_decimals: 2
+          filters:
+            - sliding_window_moving_average:
+                window_size: 5
+                send_every: 5
+          # on_value:
+          #   then:
+          #   - logger.log: 
+          #       level: INFO
+          #       format: "mq135_gas_sensor: %.2f"
+          #       args: ['x']
+          #   - if:
+          #       condition:
+          #         lambda: 'return x > id(max_mq135_gas_sensor_co2);'
+          #       then:
+          #         script.execute: buzzer_script
+
+script:
+  - id: buzzer_script
+    then:
+      - switch.turn_on: ${roomname}_buzzer
+      - delay: 500ms
+      - switch.turn_off: ${roomname}_buzzer
+  - id: buzzer_script_dnd
+    then:
+      - if:
+          condition:
+            not:
+              binary_sensor.is_on: ha_do_not_disturb_ib
+          then:
+            - switch.turn_on: ${roomname}_buzzer
+            - delay: 500ms
+            - switch.turn_off: ${roomname}_buzzer
+  - id: buzzer_script_short_dnd
+    then:
+      - if:
+          condition:
+            not:
+              binary_sensor.is_on: ha_do_not_disturb_ib
+          then:
+            - switch.turn_on: ${roomname}_buzzer
+            - delay: 5ms
+            - switch.turn_off: ${roomname}_buzzer
+  - id: buzzer_script_turn_off
+    mode: single
+    then:
+      - delay: 1s
+      - switch.turn_off: ${roomname}_buzzer
